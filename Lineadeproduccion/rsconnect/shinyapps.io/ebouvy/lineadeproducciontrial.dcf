@@ -1,0 +1,11 @@
+name: lineadeproducciontrial
+title: Lineadeproduccion(trial)
+account: ebouvy
+server: shinyapps.io
+appId: 148828
+bundleId: 667376
+url: https://ebouvy.shinyapps.io/lineadeproducciontrial/
+when: 1483420330.38671
+asMultiple: FALSE
+asStatic: FALSE
+ignoredFiles: Modelos por linea de produccion.csv|tiempos.csv|tiempos_asign.csv|www/formato.PNG

@@ -2,7 +2,7 @@ name: Publish Document
 title:
 account: rpubs
 server: rpubs.com
-appId: https://api.rpubs.com/api/v1/document/221946/a7be15dd98cc46e580af815182fd42bc
-bundleId: https://api.rpubs.com/api/v1/document/221946/a7be15dd98cc46e580af815182fd42bc
-url: http://rpubs.com/espinosabouvy/221946
-when: 1478566228.00428
+appId: https://api.rpubs.com/api/v1/document/234660/83e49ee3de54466f8d534b89ed6a8dfb
+bundleId: https://api.rpubs.com/api/v1/document/234660/83e49ee3de54466f8d534b89ed6a8dfb
+url: http://rpubs.com/espinosabouvy/234660
+when: 1481514274.08059

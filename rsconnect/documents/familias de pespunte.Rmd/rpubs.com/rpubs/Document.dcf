@@ -2,7 +2,7 @@ name: Document
 title:
 account: rpubs
 server: rpubs.com
-appId: https://api.rpubs.com/api/v1/document/221946/a7be15dd98cc46e580af815182fd42bc
-bundleId: https://api.rpubs.com/api/v1/document/221946/a7be15dd98cc46e580af815182fd42bc
-url: http://rpubs.com/publish/claim/221946/63b40198ec3e440ea67d6b3bda6ea1b4
-when: 1477491235.84283
+appId: https://api.rpubs.com/api/v1/document/234660/83e49ee3de54466f8d534b89ed6a8dfb
+bundleId: https://api.rpubs.com/api/v1/document/234660/83e49ee3de54466f8d534b89ed6a8dfb
+url: http://rpubs.com/publish/claim/234660/58d7101ccc134684b483d681672e8f48
+when: 1481513842.12416

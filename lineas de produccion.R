@@ -1,6 +1,6 @@
 ##ver tiempos por modelos para crear/asignar familias
 
-limpia <- function(){
+limpia <- function(deptos.usar = c("CORTE","CORTE Y PREPARA","FAMILIA")){
      #convierte los datos del formato perugia al formato que se requiere para el 
      #algoritmo de la pagina web
      
@@ -11,11 +11,8 @@ limpia <- function(){
      library(gridExtra)
      library(tidyr)
      
-     dptosUsar = c("CONTRAFUE-CASCO","CORTE","CORTE Y PREPARA","CU?A","ENSAMBLES",
-                   "FORRADOS","MANUALIDADES","PLANTA","SUELA","FAMILIA", "SIN DEPARTAMENTO")
-     
-     clas.tiempos <- c("factor", #linea
-                       "factor", #estilo
+      clas.tiempos <- c("factor", #linea
+                       "character", #estilo
                        "integer", #pares
                        "factor", #fampespunte
                        "factor", #fammontado
@@ -25,46 +22,44 @@ limpia <- function(){
                        "numeric", #personas
                        "numeric") #meta
      
-     #la tabla de tiempos solo contiene estilos habilitados
-     
-     #ya no se necestia, pues los tiempos son solo de estilos habilitados
-     a <- read.csv("habilita.csv")%>%
-          arrange(estilo, desc(colecc))%>%
-          select("ESTILO" = estilo, "COLECC" = colecc, "LINEA" = linea)
-     a$dup <- !duplicated(a$ESTILO, nmax = 1)
-     hab <<- a%>%filter(dup == TRUE)
-     hab$estilo.fake <- as.factor(seq(1:dim(hab)[1]))
-     
-     tbtiempos <- tbl_df(read.csv("tiempos.csv", colClasses = clas.tiempos,  stringsAsFactors = F))
+     tbtiempos <- tbl_df(read.csv("tiempos.csv", 
+                                  colClasses = clas.tiempos,  
+                                  stringsAsFactors = F))
      
      #sin filtrar deptos
      datos <- tbtiempos%>%
           select("ESTILO" = VCESTIL, DEPTO, FUNCION, TIEMPO, PERSONAS, META, LINEA)%>%
-          filter(TIEMPO>0) %>%
-          mutate("FUNCIONCOMUN" = FUNCION)
+          mutate("FUNCIONCOMUN" = FUNCION)%>%
+          mutate("DEPTO.GRAL" = ifelse(DEPTO %in% deptos.usar,"PESPUNTE",paste0(DEPTO)))%>%
+          filter(DEPTO.GRAL == "PESPUNTE")%>%
+          filter(TIEMPO > 0)
      
-     #Agrega la coleccion y agrupar corte, corte y preparado y familias
-     tiempos.temp <- merge(datos, hab, by = "ESTILO", all.x = T)%>%
-          mutate("DEPTO.GRAL" = ifelse(DEPTO %in% c("CORTE","CORTE Y PREPARA",
-                                                    "FAMILIA"),"PESPUNTE",paste0(DEPTO)))
      
+     estilos <- data.frame("ESTILO" = unique(datos$ESTILO))
+     estilos$estilo.fake <- as.factor(seq(1:dim(estilos)[1]))
+     
+     tiempos.temp <- merge(datos, estilos, by = "ESTILO")
+
      #FUNCION COMúN - A,B,C PESPUNTADORES
      tiempos.temp$FUNCIONCOMUN[grep("A-PES|B-PES|C-PES|CA-PES", tiempos.temp$FUNCION)] = "PESPUNTADOR"
      tiempos.temp$FUNCIONCOMUN[grep("A-PRE|B-PRE|C-PRE|CA-PRE", tiempos.temp$FUNCION)] = "PRELIMINAR"
      tiempos.temp$FUNCIONCOMUN[grep("CORTADOR PIEL|CORTADOR FLASH|CA-COR", tiempos.temp$FUNCION)] = "CORTADOR CLICKEN"
-     tiempos.temp$FUNCIONCOMUN[grep("CA-REB", tiempos.temp$FUNCION)] = "REBAJADOR"
+     tiempos.temp$FUNCIONCOMUN[grep("CA-REB|REBAJADOR", tiempos.temp$FUNCION)] = "REBAJADOR"
      tiempos.temp$FUNCIONCOMUN[grep("CA-DOB", tiempos.temp$FUNCION)] = "DOBLILLADOR"
      tiempos.temp$FUNCIONCOMUN[grep("COMODIN", tiempos.temp$FUNCION)] = "PRELIMINAR"
      tiempos.temp$FUNCIONCOMUN[grep("CORTADOR FORRO", tiempos.temp$FUNCION)] = "CORTADOR PUENTE"
      
-     tiempos <- tiempos.temp%>%
+     tiempos <<- tiempos.temp%>%
           filter(!is.na(estilo.fake) & DEPTO.GRAL == "PESPUNTE")%>%
           group_by(estilo.fake, FUNCIONCOMUN)%>%
           summarise("SEGUNDOS.POR.PAR" = sum(TIEMPO))%>%
           select("ESTILO" = estilo.fake, "PUESTO" = FUNCIONCOMUN, SEGUNDOS.POR.PAR)
      
      tiempos.ren <<- tiempos
+     write.csv(tiempos.ren,"Tiempos en renglones.csv",row.names = F)
+     write.csv(tiempos.ren,"tiempos.final.csv",row.names = F)
      tiempos.col <<- spread(data = tiempos, key = PUESTO, value = SEGUNDOS.POR.PAR)
+     write.csv(tiempos.col,"Tiempos en columnas.csv",row.names = F)
         
 }
 

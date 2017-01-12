@@ -1,0 +1,365 @@
+---
+title: "Subir la productividad de pespunte en fábricas de calzado asignando eficientemente los modelos a diferentes líneas de producción"
+author: "Luis Espinosa Bouvy - luis@magro.com.mx"
+date: "28 de noviembre de 2016"
+output:
+
+  html_document:
+    keep_md: yes
+---
+
+<style type="text/css">
+.table {
+
+    width: 40%;
+
+}
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r loading}
+suppressPackageStartupMessages(require(ggplot2))
+suppressPackageStartupMessages(require(dplyr))
+suppressPackageStartupMessages(require(cluster))
+suppressPackageStartupMessages(require(tidyr))
+suppressPackageStartupMessages(require(knitr))
+suppressPackageStartupMessages(require(plotly))
+
+
+     #en renglones
+     tiempos.raw <- read.csv("tiempos.final.csv")
+     
+     #revisar nas (para cada puesto debe existir dato, si no existe, debe ser cero)
+     #convertir a tabla, convertirá los vacios en nas, se deben convertir a cero
+     tiempos.col <- spread(data = tiempos.raw, key = PUESTO, value = SEGUNDOS.POR.PAR)
+     tiempos.col[is.na(tiempos.col)]<- 0
+     
+     #convertir en renglones para analisis, pero no para k-means
+     tiempos.ren  <- gather(tiempos.col, PUESTO, SEGUNDOS.POR.PAR, -ESTILO)
+     
+
+```
+
+
+###RESUMEN  
+
+Las fábricas de producción de calzado se encuentran en algún momento con la necesidad de producir mayor cantidad de modelos con bajo volumen.  Se venden muchos modelos en menores cantidades y deben hacerlo con la mayor productividad posible para no afectar sus margenes de utilidad y ser lo más eficiente posible.
+
+Un reto es definir en cuál de las líneas de producción hacer cada uno de esos modelos para que se produzca una cantidad consistente de pares hora con hora y con el menor cambio en la cantidad de personas necesarias para producir cada uno, es decir, producir modelos similares en cada línea de producción.  
+
+**La propuesta de este artículo es utilizar el tiempo que se debe invertir en la producción de cada modelo para definir en donde debe producirse.**
+
+Crear lineas de producción que tengan tiempos de proceso similar en el pespunte, es decir, una necesidad de personal con la menor desviación posible entre un producto y otro, genera estabilidad en la producción, una menor diferencia entre las capacidades de producción diaria y mayores eficiencias en el balanceo del trabajo.  
+
+Las fábricas saben cuanto tiempo de proceso lleva cada modelo, pues así conocemos el costo de mano de obra de cada uno, por lo tanto, podemos utilizar esa información para tomar la mejor decisión de donde producir cada uno y cuanta gente necesitamos para producirlos.  
+
+**El resultado de utilizar de manera profesional la información que tenemos a la mano en nuestros softwares de producción y ERPs puede dar diminuciones en la variación del tiempo en las líneas de producción del 70%, como es el caso de este análisis**
+
+Al final del artículo se puede encontrar la agrupación final de los modelos que se usaron para este ejercicio.  
+
+### CONCEPTOS GENERALES    
+Para este artículo utilizaremos datos generales de producción de una fábrica de calzado, donde la información generada tiene el siguiente formato y cada columna representa el tiempo, en segundos, necesario para fábricar un par de zapatos en área de pesunte:  *(La tabla completa de modelos y tiempos utilizada se puede ver en el apendice A)*
+```{r tabla_tiempos}
+     kable(head(tiempos.col), format = "markdown")
+```
+
+Los datos tienen las siguientes características:  
+
+1. Se utilizarán `r dim(tiempos.col)[1]` modelos diferentes en el análisis, con necesidades diferentes cada uno.  
+
+2. Los tiempos están en segundos. 
+
+2. Las operaciones de corte y rebajado están en un proceso anterior de pre-pespunte, por lo que dichas operaciones y puestos no aparecen en este ejercicio.
+
+Para entender un poco la complejidad de la situación actual en la industria de los zapatos, vamos revisar un poco estos datos y explicar algunos conceptos que serán útiles para entender mejor el objetivo de este artículo.
+
+En la siguiente tabla podemos ver las diferencias entre el tiempo necesario que debemos invertir en cada modelo para producir un par de zapatos de cada uno.
+
+```{r boxplots, fig.height=5, fig.width=9}
+     x <- list(title = "PUESTO")
+     y <- list(title = "SEGUNDOS POR PAR")
+     
+     gp <- plot_ly(data = tiempos.ren, x=~PUESTO, y=~SEGUNDOS.POR.PAR, type = "box")%>%
+                   layout(xaxis = x, yaxis = y)
+     ggplot(data = tiempos.ren, aes(PUESTO, SEGUNDOS.POR.PAR))+ geom_boxplot(col = "dark blue")
+
+```
+ 
+
+Se puede deducir la la siguiente gráfica lo siguiente:
+
+1. Existe una diferencia considerable en el promedio de tiempo que se requiere de cada uno de los puestos y vemos que la mayor parte de nuestro personal serán preliminares, luego pespuntadores y lo que menos necesitamos son doblilladores.  
+
+2. Cada una de las cajas y sus líneas representan la mediana y cada uno de los quantiles de cada puesto, por ejemplo:
+     
+     * Para los preliminares.  
+```{r quantiles}
+ceiling(quantile(tiempos.ren[tiempos.ren$PUESTO == "PRELIMINAR",]$SEGUNDOS.POR.PAR))
+```
+
+El 25% de los estilos utilizan `r ceiling(quantile(tiempos.ren[tiempos.ren$PUESTO == "PRELIMINAR",]$SEGUNDOS.POR.PAR, probs = 0.25)) ` segundos o menos, la mitad `r ceiling(quantile(tiempos.ren[tiempos.ren$PUESTO == "PRELIMINAR",]$SEGUNDOS.POR.PAR, probs = 0.5)) ` segundos o menos.
+
+Por lo tanto, podemos imaginar lo imporante que es agrupar la producción de los modelos en forma correcta o terminaremos produciendo modelos que necesitan 2400 segundos por par (`r ceiling(2400/60)` minutos) junto con modelos que requieren 350 segundos por par (`r ceiling(350/60)` minutos).  Solo como un ejercicio que vuelva un poco más claro esto, supongamos que debemos producir 700 pares de estos dos modelos, vamos a calcular cuanta gente necesitamos para producirlos...
+
+Modelo de **2400** segundos por par:
+
+|Pares a producir|Tiempo Preliminares|Tiempo total|Horas/Minutos Trabajo|Preliminares|
+|----------------|-------------------|------------|---------------------|------------|
+|700 pares       | 40 minutos/par    |28,000 min. |  8 hrs/ 480 min     | 59 pers    |
+
+
+Modelo de **350** segundos por par:  
+
+|Pares a producir|Tiempo Preliminares|Tiempo total|Horas/Minutos Trabajo|Preliminares|
+|----------------|-------------------|------------|---------------------|------------|
+|700 pares       | 5.8 minutos/par   |4,060 min.  |  8 hrs/ 480 min     | 9 pers     |
+
+Es una diferencia considerable que para algunos modelos necesitamos 59 preliminares y para otros únicamente 9, para producir la misma cantidad de pares.  
+
+**Esta diferencia, respecto al promedio se le conoce como desviación estandar y esta deviación es lo que trataremos de minimizar al agrupar los modelos correctamente.**  
+
+Para tener un punto de referencia, vamos a revisar el promedio que necesitamos de cada puesto y su desviación.  Al final del artículo podremos revisar cuanto mejoramos estos datos y podremos cuantificar la mejora al agrupar correctamente los modelos en líneas de producción.  
+
+```{r benchmark}
+prom.sd <- data.frame(tiempos.ren%>%group_by(PUESTO) %>%summarise("Promedio" = ceiling(mean(SEGUNDOS.POR.PAR)), "Desviacion" = ceiling(sd(SEGUNDOS.POR.PAR)) , "Porcentaje" = round(Desviacion/Promedio*100,2)))
+
+kable(prom.sd, format = "markdown")
+
+```
+
+Gráficamente, estas diferencias se ven de la siguiente forma:
+```{r grafica_desviaciones, fig.height=5, fig.width=9}
+ggplot(data = tiempos.ren, aes(ESTILO, SEGUNDOS.POR.PAR)) + 
+     geom_point(col = "navy", alpha = 0.5) + 
+     facet_wrap(~PUESTO, scales = "free")+ 
+     geom_hline(data = tiempos.ren%>%
+                      group_by(PUESTO)%>%
+                      summarise("Promedio" = mean(SEGUNDOS.POR.PAR)),
+                aes(yintercept = Promedio), 
+                 col = "red", lwd = 1) + 
+     xlab("Modelos") +
+     ylab("Segundos por par")  +
+     ggtitle("Tiempo (segundos) para producir un par")
+
+```
+
+Donde la línea roja representa el promedio de tiempo necesario para cada puesto y cada uno de los puntos es un estilo, con el tiempo requerido de cada puesto para producir un par.  
+
+### EXPLICACION DEL ANALISIS  
+
+Utilizaremos 2 metologías para llegar a la mejor forma de agrupar los modelos en líneas de producción, el primero nos ayudará a definir la cantidad de líneas de producción que resulta conveniente generar y la segunda será la definición de cuales modelos debe asignarse a cada una de esas líneas.
+
+
+#### CANTIDAD DE LINEAS DE PRDUCCIÓN  
+
+Para definir cuantas familias, vamos a revisar cuanta desviación hay entre los modelos de forma visual mediante un árbol de agrupamiento.
+
+```{r arbol_clust, fig.height=5, fig.width=9, warning=FALSE, error=FALSE}
+     set.seed(8)
+
+     distancias <- dist(tiempos.col, method = "euclidian")
+     arbol <- hclust(distancias)
+     
+     nrd = 500
+     ngr = 300
+     nbl = 1500 
+     
+     plot(arbol, axes = T, main = "Cluster de agrupamiento", 
+          xlab = "Modelos", ylab = "Indice de desviación")
+          abline(h = nrd, col="red") + 
+          abline(h = ngr, col = "green") + 
+          abline(h = nbl, col = "blue")
+     
+     rd <- max(unique(cutree(arbol, h= nrd)))
+     gr <- max(unique(cutree(arbol, h= ngr)))
+     bl <- max(unique(cutree(arbol, h= nbl)))
+     
+     #familias a crear en el análisis
+     familias <- rd
+```
+
+En el análisis gráfico se marcan con líneas 3 diferentes opciones y se debe tomar una decisión que no únicamente está basada en los tiempos de los modelos y se explicará más adelante la razón. Cada una de las líneas representa la creación de diferente cantidad de líneas de producción como podemos ver en la siguiente tabla:
+
+| Linea azul | Líneas de producción |
+|------------|----------------------|
+|Azul       | `r bl`               |
+|Roja       | `r rd`               |
+|Verde       | `r gr`               |
+
+La decisión de cuantas líneas de producción no únicamente tiene que estar basada en minimizar la desviación entre los modelos a producir por una razón sencilla, la menor desviación la encontramos teniendo una línea de producción para cada modelo y para el caso de nuestro analisis la razón de agrupar modelos viene del hecho de tener cada vez menores pedidos de una mayor cantidad de modelos, así que asumir que podemos crear una línea de producción para cada modelo vuelve imposible la programación de la producción  pues la demanda diaria de cada uno de ellos no es constante. 
+
+Algunas consideraciones serían:  
+
+1. Estabilidad de la demanda para mantener a todas las líneas de producción trabajando todos los días.  
+
+2. El costo de supervisión de cada una de las líneas.  
+
+3. Entre mayor sea la cantidad de líneas de producción, el tackt-time (ritmo de proceso) se vuelve mayor y la cantidad de cambios de modelo se vuelve menor.  
+
+4. Un mayor tackt-time implica buffers (inventarios entre procesos) mayores para evitar mayor cantidad de cambios de modelo en los procesos anteriores y posteriores.  
+
+5. Mayor cantidad de máquinas no flexibles (ojillar, doblillar, rebajar, etc), pues una menor cantidad de modelos por línea de producción genera que algunas máquinas no sean aprovechadas al 100% si no se encuentran en la ruta crítica del balanceo del trabajo, pero se deberá tener una por cada línea de producción.
+
+Tomar en cuenta cuantitativamente estas consideraciones no es parte de esta análisis, pues los costos de estas cambian de empresa a empresa y la intensión es que pueda ser utilizado por la generalidad de empresas de calzado con la problematica de tener muchos modelos con menores ventas de cada uno de ellos.
+
+Para este análisis agruparemos los modelos a producir en **`r familias`** líneas de producción.
+
+#### DEFINICIÓN DE MODELOS POR LÍNEA DE PRODUCCIÓN  
+
+Para explicar un poco como es que se realiza esta agrupación vamos a realizar un ejemplo sencillo que incluye únicamente pespuntadores y preliminares y verlo gráficamente.
+
+Supongamos los siguientes modelos:
+
+```{r tabla_ejemplo}
+set.seed(88)
+gr <- data.frame("ESTILO" = c(1:6), 
+                 "PESPUNTADOR" = c(489,232,308,262,584,133), 
+                 "PRELIMINAR" = c(1501,1214,987,1091,1532,687))
+k <- kmeans(scale(gr[2:3]), centers = 3 ,nstart = 10, iter.max = 100)
+gr <- cbind(gr, CLUSTER = k$cluster)
+centers <- gr[2:4]%>%group_by(CLUSTER)%>%summarise("PESPUNTADOR" = mean(PESPUNTADOR), "PRELIMINAR" = mean(PRELIMINAR) )
+kable(gr[,1:3], format = "markdown")
+```
+
+El análisis que utilizaremos se basa en la idea de agrupar los modelos con la menor distancia entre ellos, podemos imaginar de mejor manera esto si lo vemos gráficamente.  
+
+```{r gr_ejemplo}  
+
+ggplot(data = gr, aes(PESPUNTADOR,PRELIMINAR)) +
+     geom_point(size = 2) + 
+     xlab("TIEMPO DE PESPUNTADORES")  + 
+     ylab("TIEMPO DE PRELIMINARES") +
+     theme(legend.position="none") +
+     geom_text(aes(label=paste("Estilo",ESTILO)),hjust=1, vjust=-1, size = 3)
+
+```
+
+En este caso, sería muy lógico pensar en dos o tres grupos, basandonos en las distancias entre los puntos, para 2 grupos, juntaríamos los estilos 1 y 5, y en otro grupo, el resto y si quisieramos hacer 3 grupos, se vería de la siguiente forma:
+
+```{r gr_ejemplo_kmeans}
+ggplot(data = gr, aes(PESPUNTADOR,PRELIMINAR, colour = factor(CLUSTER))) +
+     geom_point(size = 2) + 
+     geom_point(data = centers, 
+                aes(PESPUNTADOR,PRELIMINAR), pch= 3, col = "red", size = 4) +
+     xlab("TIEMPO DE PESPUNTADORES")  + 
+     ylab("TIEMPO DE PRELIMINARES") +
+     theme(legend.position="none") +
+     geom_text(aes(label=paste("Estilo",ESTILO)),hjust=1, vjust=-1, size = 3)
+
+
+```
+
+Al ser un ejemplo sencillo, donde únicamente debemos agrupar los modelos con tiempos de proceso de PESPUNTADORES y PRELIMINARES similares se puede entender el concepto general de la metología que se utilizará.
+
+Las "cruces" en el gráfico representan los promedios de pespuntadores y preliminares que tendría cada línea de producción.
+
+Al utilizar esta metología para todos los modelos de nuestro artículo y todos los puestos que estamos utilizando para agrupar, obtenemos cuáles modelos deben producirse en cada línea de producción. *(La tabla completa se puede ver en el apendice B)*
+
+```{r k-means}
+
+set.seed(88)
+gr <- tiempos.col[c(2:dim(tiempos.col)[2])]
+k <- kmeans(scale(gr), centers = familias ,nstart = 10, iter.max = 100)
+agrupacion.final <- cbind(tiempos.col, "LINEA.PRODUCCION" = k$cluster)
+reporte <- agrupacion.final%>%select(LINEA.PRODUCCION, ESTILO)%>%
+     arrange(LINEA.PRODUCCION)
+
+#agregar cluster a tabla por renglon
+tiempos.ren.cluster <- merge(tiempos.ren, reporte, by = "ESTILO")
+```
+
+Podemos ver gráficamente como quedaron asignados los modelos en las siguientes gráficas:  
+```{r graficar_asignacion, fig.height=5, fig.width=9}
+
+g <- ggplot(data = tiempos.ren.cluster, aes(PUESTO, SEGUNDOS.POR.PAR))+ geom_boxplot() + facet_wrap(~LINEA.PRODUCCION, scales = "free",ncol = 2)
+g
+
+```
+
+### RESULTADOS   
+
+Al iniciar obtuvimos los valores general sin agrupar los estilos en líneas de producción en la siguiente tabla:
+
+```{r de_benchmark}
+prom.sd <- data.frame(tiempos.ren%>%
+                           group_by(PUESTO) %>%
+                           summarise("Promedio" = ceiling(mean(SEGUNDOS.POR.PAR)), "Desviacion" = ceiling(sd(SEGUNDOS.POR.PAR)) , "Porcentaje" = round(Desviacion/Promedio*100,2)))
+
+kable(prom.sd, format = "markdown")
+
+```
+
+Los valores promedio de las desviaciones después de agrupar los modelos en `r familias` líneas de producción queda de la siguiente forma: *(Se puede consultar la tabla completa de las desviación para cada una de las líneas de producción en el apendice C)*
+```{r resultados_promedios}
+
+prom.sd.clust <- tiempos.ren.cluster%>%
+                           group_by(LINEA.PRODUCCION, PUESTO)%>%
+                           summarise("Promedio" = ceiling(mean(SEGUNDOS.POR.PAR)),
+                                     "Desviacion" = ceiling(sd(SEGUNDOS.POR.PAR)),
+                                     "Porcentaje" = round(Desviacion/Promedio*100,2))%>%
+     group_by(PUESTO)%>%
+     summarise("Promedio" = ceiling(mean(Promedio)), 
+               "Desviacion" = ceiling(sd(Desviacion)) , 
+               "Porcentaje" = round(Desviacion/Promedio*100,2))
+
+kable(prom.sd.clust, format = "markdown")
+
+```
+
+Al final se logra bajar la desviación en el tiempo promedio necesario para producir los estilos de:
+```{r resultado}
+
+resultado <- data.frame(cbind("PCT.INICIAL" = prom.sd$Porcentaje,
+                   "PCT.FINAL" = prom.sd.clust$Porcentaje))%>%
+     mutate("DISMINUCION DE DESVIACION" = paste0(round((1-PCT.FINAL/PCT.INICIAL)*100,2),"%"))
+
+kable(resultado, format = "markdown", align = "c")
+
+```
+
+
+En conclusión asignar correctamente los modelos que debemos producir y determinar de manera profesional cuantas líneas de producción tener, mejora considerablemente la productividad, permite tener metas diarias de producción constantes y facilita el trabajo diario de supervisores y jefes en el balanceo del trabajo diario. 
+
+La segunda parte de este ejercio sería determinar la plantilla de personal necesaria en cada una de las líneas de producción utilizando la demanda de cada modelo.
+
+Una tercera y última parte tendría que considerar la programación diaria de producción de cada una de estas líneas, determinar las necesidades diarias de personal de cada puesto y realizar movimientos de personas entre las diferentes líneas de producción día con día.
+
+### CONTACTO  
+
+Si tienes dudas sobre este artículo o estas interesado en implementar mejoras como esta en tu empresa, envíanos un correo a luis@magro.com.mx o en nuestro sitio web [www.magro.com.mx](www.magro.com.mx)  
+
+-- Te invitamos a que realices este mismo análisis, sin costo, con los datos reales de tu empresa en nuestro sitio web en [Lineas de produccion de calzado](http://www.magro.com.mx/index.php/apps)
+
+### APENDICE A  
+
+Tabla de modelos y sus tiempos de proceso
+```{r apex.tablamodelos, out.width=4}
+
+kable(tiempos.col, format = "markdown",align = "c")
+```
+
+### APENDICE B  
+
+Tabla de modelos asignados a cada línea de producción
+```{r apex.tablaasignados}
+
+kable(reporte, format = "markdown", align = "l")
+```
+
+### APENDICE C  
+
+Tabla desviaciones por línea de producción
+
+```{r apex.desv.final}
+desviacion.final <- tiempos.ren.cluster%>%
+                           group_by(LINEA.PRODUCCION, PUESTO)%>%
+                           summarise("Promedio" = ceiling(mean(SEGUNDOS.POR.PAR)),
+                                     "Desviacion" = ceiling(sd(SEGUNDOS.POR.PAR)),
+                                     "Porcentaje" = round(Desviacion/Promedio*100,2))
+kable(desviacion.final, format = "markdown")
+```
+
+

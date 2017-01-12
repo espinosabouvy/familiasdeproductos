@@ -1,0 +1,11 @@
+name: lineasdeproduccion
+title: Lineasdeproduccion
+account: ebouvy
+server: shinyapps.io
+appId: 148812
+bundleId: 674445
+url: https://ebouvy.shinyapps.io/lineasdeproduccion/
+when: 1484028541.56784
+asMultiple: FALSE
+asStatic: FALSE
+ignoredFiles: Modelos por linea de produccion.csv|tiempos.csv|tiempos_asign.csv|www/formato.PNG

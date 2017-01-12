@@ -2,22 +2,26 @@
 title: "Subir la eficiencia de pespunte creando familias de productos"
 author: "Luis Espinosa Bouvy - espinosabouvy@gmail.com"
 date: "4 de noviembre de 2016"
-output: 
-  html_document: 
+output:
+
+  html_document:
     keep_md: yes
 ---
 .  
 
 ```{r Leer_datos, include=FALSE, cache=FALSE}
-library(dplyr)
+#  pdf_document: default
+
+     library(dplyr)
      library(ggplot2)
      library(gtools)
      library(cluster)
      library(gridExtra)
      library(tidyr)
-     library(knitr)     
+     library(knitr)
+     library(plotly)
 
-     dptosUsar = c("CONTRAFUE-CASCO","CORTE","CORTE Y PREPARA","CU—A","ENSAMBLES",
+     dptosUsar = c("CONTRAFUE-CASCO","CORTE","CORTE Y PREPARA","CU?A","ENSAMBLES",
                    "FORRADOS","MANUALIDADES","PLANTA","SUELA","FAMILIA", "SIN DEPARTAMENTO")
      
      clas.tiempos <- c("factor", #linea
@@ -37,8 +41,10 @@ library(dplyr)
           select("ESTILO" = estilo, "COLECC" = colecc, "LINEA" = linea)
      a$dup <- !duplicated(a$ESTILO, nmax = 1)
      hab <- a%>%filter(dup == TRUE)
+     hab$estilo.fake <- as.factor(seq(1:dim(hab)[1]))
      
-     tbtiempos <- tbl_df(read.csv("tiempos.csv", colClasses = clas.tiempos,  stringsAsFactors = F))
+     tbtiempos <- tbl_df(read.csv("tiempos.csv", colClasses = clas.tiempos,
+                                  stringsAsFactors = F))
      
      #sin filtrar deptos
      datos <- tbtiempos%>%
@@ -47,167 +53,154 @@ library(dplyr)
           mutate("FUNCIONCOMUN" = FUNCION)
      
      #Agrega la coleccion
-     tiempos <<- merge(datos, hab, by = "ESTILO", all.x = T)
-
-     #FUNCION COM⁄N - A,B,C PESPUNTADORES
-     tiempos$FUNCIONCOMUN[grep("A-PES|B-PES", tiempos$FUNCION)] = "PESPUNTADOR"
-     tiempos$FUNCIONCOMUN[grep("A-PRE|B-PRE", tiempos$FUNCION)] = "PRELIMINAR"
-     tiempos <<- tiempos
+     tiempos.temp <<- merge(datos, hab, by = "ESTILO", all.x = T)
+     
+     #FUNCION COM√∫N - A,B,C PESPUNTADORES
+     tiempos.temp$FUNCIONCOMUN[grep("A-PES|B-PES", tiempos.temp$FUNCION)] = "PESPUNTADOR"
+     tiempos.temp$FUNCIONCOMUN[grep("A-PRE|B-PRE", tiempos.temp$FUNCION)] = "PRELIMINAR"
+     tiempos <<- tiempos.temp%>%
+          select("ESTILO" = estilo.fake, DEPTO, FUNCION, TIEMPO, PERSONAS, META,
+                 LINEA.x, FUNCIONCOMUN, COLECC, LINEA.y, dup)%>%
+          filter(!is.na(ESTILO))
      
 ```
 
-```{r Agrupando, echo=FALSE}
+```{r Agrupando, echo=FALSE,cache=TRUE}
 
      
      #elimina estilos de cantera con funcion CA-
      estilos <-  tiempos[-grep("CA-", tiempos$FUNCIONCOMUN),]
      
-     #usa solo estilos con demanda
-     estilos_dem <<- data.frame(read.csv("demanda.csv", na.strings = c("#N/A","")))
           #total personas por estilo
           totpers <- estilos%>%
-               filter(DEPTO %in% "FAMILIA", ESTILO %in% estilos_dem$ESTILO)%>%
+               filter(DEPTO %in% "FAMILIA")%>%
                select(ESTILO, PERSONAS)%>%
                group_by(ESTILO)%>%
                summarise("TOT.PERSONAS" = sum(PERSONAS))
           
           critico <- estilos%>%
-               filter(DEPTO %in% "FAMILIA", ESTILO %in% estilos_dem$ESTILO)%>%
+               filter(DEPTO %in% "FAMILIA")%>%
                select(ESTILO, COLECC, FUNCIONCOMUN, PERSONAS)%>%
                group_by(ESTILO, COLECC, FUNCIONCOMUN)%>%
                summarise(PERSONAS = sum(PERSONAS))
 ```
   
   
-  
-####RESUMEN GENERAL
-Crear familias de productos que tengan un tiempo de proceso similar, una necesidad de personal  
-especializado con la menor desviaciÛn posible, genera estabilidad en la producciÛn, menor diferencia  
-entre las capacidades de producciÛn diarias y mayores eficiencias en el balanceo del trabajo.  
+####RESUMEN
+Crear familias de productos que tengan tiempos de proceso similar en el pespunte, es decir, una necesidad de personal especializado con la menor desviaci√≥n posible entre un producto y otro, genera estabilidad en la producci√≥n, una menor diferencia entre las capacidades de producci√≥n diaria y mayores eficiencias en el balanceo del trabajo.  
 
-Si conocemos los tiempos de proceso de cada modelo y los conocimientos que debe tener la persona  
-que debe realizar cada operacion (su especializaciÛn) , podemos agrupar modelos para que  
-las diferencias del tiempo requerido para producirlos sea la menor posible.  Eso es lo que se busca  
-con este an·lisis.
+Si conocemos los tiempos de proceso de cada modelo que vamos a producir y los conocimientos que debe tener la persona que debe realizar cada operacion (su especializaci√≥n), podemos agrupar modelos para que las diferencias en el tiempo requerido para producirlos sea la menor posible.  Eso es lo que se busca con este an√°lisis.  
+
+Al final del art√≠culo se puede encontrar la agrupaci√≥n final de los modelos que usaron para este ejercicio.  
 
 
-Se establecieron los siguientes objetivos:  
+#### CONCEPTOS GENERALES
+Para aclarar algunos conceptos que encontraremos m√°s adelante en este art√≠culo explicaremos algunos de ellos.
 
-1.  Agrupar modelos con requerimientos de personal similar.  
-2.  Minimizar la desviaciÛn estandar del requerimiento de personal calificado y total.   
-3.  Asignar a cada modelo su familia de pespunte.
-4.  Establecer la menor cantidad de familias posible.  
-.  
+1. Cada producto requiere, por ejemplo, que un pespuntador-A (experto) realice ciertas costuras para el armado del zapato, dichas costuras requieren un tiempo y dicho tiempo es diferente para cada modelo, lo mismo pasa para las preliminares, los doblilladores o rebajadores.  Esto hace que necesitemos diferente cantidad de personas de cada puesto para producir diferentes modelos.
 
+2. Cuando queremos saber cu√°l es nuestra necesidad de personal, lo que normalmente hacemos, es multiplicar el tiempo que se debe invertir en cada par, lo multiplicamos por los pares que debemos producir (o proyectamos producir) y eso lo dividimos entre tiempo que tenemos disponible cada d√≠a y con eso sabemos cuantas personas necesitamos.
 
-#### DESCRIPCION  
-La producciÛn de calzado tiene una alta desviaciÛn en las necesidades de mano de obra calificada  
-seg˙n el tipo de producto que se fabrica y la temporada del aÒo. 
+Por ejemplo:
 
-```{r desvest, echo=FALSE}
-     sd.plot <- tiempos%>%
+|Pares vendidos|Tiempo Pespuntador-A|Tiempo total|Horas Trabajo|Personas   |
+|--------------|--------------------|------------|-------------|-----------|
+|1000 pares    | 55 segundos/ par   |55000 seg.  |  8 hrs      | 1.9 pers  |  
+
+Es decir, necesitamos 2 pespuntadores-A para producir 1000 pares por d√≠a.
+
+Pero, que pasa cuando debemos producir 200 pares de estilo 2, que requiere 35 segundos por par de un pespuntador-A, 144 pares del estilo 2, que requiere 16 seg/par de un pesuntador-A, etc. Y adem√°s, tenemos pespuntadores-A,B y C, preliminares A,B,C, rebajadores, doblilladores, cortadores, etc.  El c√°lculo se complica mucho m√°s, como podemos ver en la siguiente gr√°fica que representa las diferencias entre las necesidades de personal de los modelos de este ejercicio.  
+
+```{r desvest, echo=FALSE, results="asis"}
+     sd.plot <<- tiempos%>%
           filter(DEPTO == "FAMILIA" & FUNCIONCOMUN %in% c("PESPUNTADOR","PRELIMINAR",
                                                       "C-PESPUNTADOR","C-PRELIMINAR",
                                                       "DOBLILLADOR"))
-     ggplot(data = sd.plot,aes(FUNCIONCOMUN,PERSONAS)) + geom_boxplot() +
+     g <- ggplot(data = sd.plot,aes(FUNCIONCOMUN,PERSONAS)) + geom_boxplot(fill = "wheat") +
         theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 10)) + 
           xlab("Puestos") + 
           ylab("Cantidad de personal requerido") + 
           ggtitle("Personal necesario para producir 100 pares por hora")
+     
+     x <- list(title = "PUESTO")
+     y <- list(title = "PERSONAS")
+     #gp <- ggplotly(g)     
+     gp <- plot_ly(data = sd.plot, x=~FUNCIONCOMUN, y=~PERSONAS, type = "box")%>%
+                   layout(xaxis = x)
+     gp
+     
 ```
 
-En la gr·fica podemos ver que los **pespuntadores** requeridos para producir los modelos de  
-nuestro an·lisis tiene una media de **`r round(mean(sd.plot[sd.plot$FUNCIONCOMUN == "PESPUNTADOR",]$PERSONAS),2)`**
-                                        , una desviaciÛn estandar de 
-**`r round(sd(sd.plot[sd.plot$FUNCIONCOMUN == "PESPUNTADOR",]$PERSONAS),2)`**, con un rango de 
-**`r round(range(sd.plot[sd.plot$FUNCIONCOMUN == "PESPUNTADOR",]$PERSONAS),2)`**  
-pespuntadores para producir la misma cantidad de pares por hora.
+La gr√°fica muestra como est√°n distribuidas las necesidades de cada tipo de operario, por ejemplo, los C-Preliminar:
 
-Y un caso similar es el puesto de *C-PRELIMINAR* con media de **`r round(mean(sd.plot[sd.plot$FUNCIONCOMUN == "C-PRELIMINAR",]$PERSONAS),2)`**
-                                                                      , una desviaciÛn estandar de 
-**`r round(sd(sd.plot[sd.plot$FUNCIONCOMUN == "C-PRELIMINAR",]$PERSONAS),2)`**,  
-y un rango de 
-**`r round(range(sd.plot[sd.plot$FUNCIONCOMUN == "C-PRELIMINAR",]$PERSONAS),2)`**
+```{r, echo=FALSE}
+quantile(sd.plot[sd.plot$FUNCIONCOMUN == "C-PRELIMINAR",]$PERSONAS)
 
-Por lo tanto el siguiente an·lisis tiene como objetivo crear familias de producciÛn en el ·rea  
-de pespunte, donde se encuentra la mayor dispersiÛn en la necesidad de mano de obra para cada   
-producto y donde de manera regular encontramos el cuello de botella de las f·bricas de calzado.
+     #familias a crear
+     familias <- 6
+     
+```
 
-La cantidad de doblilladores va de 1 a 2 personas y no es significativo para diferenciar un estilo  
-de otro y por lo tanto se descartan como variables significativas.  Por otro lado, los pespuntadores  
-y preliminares "C" son personas con menor grado de especializaciÛn y es posible capacitarlas y/o  
-reclutarlas, asÌ que tampoco ser·n consideradas individualmente en este an·lisis y entrar·n estas  
-3 variables en "total personas"
+Esto quiere decir, y lo podemos ver en la gr√°fica, que el 50% de los estilos requieren `r quantile(sd.plot[sd.plot$FUNCIONCOMUN == "C-PRELIMINAR",]$PERSONAS,0.5)` personas o menos, el 75% requieren `r quantile(sd.plot[sd.plot$FUNCIONCOMUN =="C-PRELIMINAR",]$PERSONAS,0.75)` o menos, es decir, la gr√°fica, nos muestra, que tan diferente es la cantidad de gente necesaria para producir la misma cantidad de pares de cada uno.
 
-Se busca agrupar los modelos por familia, buscando la menor desviaciÛn estandar  
-para la funciones crÌticas:  
+Como otro ejemplo, podemos ver que los **pespuntadores** requeridos para producir los modelos de nuestro an√°lisis tiene una media de **`r round(mean(sd.plot[sd.plot$FUNCIONCOMUN == "PESPUNTADOR",]$PERSONAS),2)`** y  con un rango de **`r round(range(sd.plot[sd.plot$FUNCIONCOMUN == "PESPUNTADOR",]$PERSONAS),2)`** pespuntadores para producir la misma cantidad de pares para diferentes estilos y una desviaci√≥n en las   necesidades de **`r round(sd(sd.plot[sd.plot$FUNCIONCOMUN == "PESPUNTADOR",]$PERSONAS),2)`**. *Es decir, tenemos un promedio de 5 pespuntadores, pero podemos llegar a necesitar, desde 1 hasta 26, no parece f√°cil de administrar.*
+
+3. La desviaci√≥n estandar en este caso la vamos a definir como la variacion en la necesidad de personal requerido para producir la misma cantidad de pares de diferentes modelos.  
+
+Por ejemplo:  
+
+Los doblilladores tiene una desviaci√≥n estandar de `r round(sd(sd.plot[sd.plot$FUNCIONCOMUN == "DOBLILLADOR",5]),2)` y para los preliminares de `r round(sd(sd.plot[sd.plot$FUNCIONCOMUN == "PRELIMINAR",5]),2)`. Esto quiere decir que para producir la misma cantidad de pares de un estilo a otro, la cantidad de doblilladores que se necesitan cambia mucho menos, que cuando hablamos de preliminares, la variaci√≥n en la necesidad de preliminares es mayor.  Como podemos ver en la gr√°fica siguiente:  
+```{r, echo=FALSE}
+prel <- sd.plot%>%filter(FUNCIONCOMUN=="PRELIMINAR" | FUNCIONCOMUN == "DOBLILLADOR")
+ggplot(data = prel, aes(x=PERSONAS)) + geom_histogram(binwidth = 1, fill = "orange", colour = "black") + facet_wrap(~FUNCIONCOMUN) + ylab("Cantidad de modelos") +
+     xlab("Personas necesarias")
+
+```
+
+Para los doblilladores, encontramos m√°s de 80 modelos que requieren 1 doblillador, casi 50 modelos que requieren 2.  Pero al ver los preliminares, encontramos una menor  cantidad de modelos que requieren una misma cantidad de preliminares, es decir, su variaci√≥n es mayor (mayor desviaci√≥n estandar).  
+
+#### TRANSFORMACION Y SIMPLIFICACI√ìN
+Realizaremos agrupaciones de funciones y descartaremos el uso de algunas otras en este an√°lisis para que sea lo m√°s utilizable en la realidad y sobre todo para que sea interpretable cuando realicemos gr√°ficos y poder ver los resultados de forma sencilla.
+
+1. Los pespuntadores A (expertos) y pespuntadores B (completos), as√≠ como prelimares A y B, ser√°n consideradas √∫nicamente como PESPUNTADORES y PRELIMINARES, asumiendo que los tipo B, pueden realizar las operaciones de tipo A, pero con una menor velocidad.  
+
+2. Las funciones que tengan una desviaci√≥n estandar (dispersi√≥n en la necesidad) menor a UNA persona, tambi√©n ser√°n descartados para el an√°lisis individual, pues simplifica el an√°lisis y la diferencia en la necesidad de estas funciones entre un grupo y otro no ser significativa para decidir si un modelo entra en un grupo o en otro.
+
+En la siguiente gr√°fica podemos ver las funciones que ser√°n descartadas para el an√°lisis.  
+
+```{r, echo=FALSE}
+sds <- sd.plot%>%
+     filter(FUNCION %in% c("A-PESPUNTADOR","B-PESPUNTADOR","A-PRELIMINAR",
+                           "B-PRELIMINAR", "C-PESPUNTADOR","C-PRELIMINAR",
+                           "DOBLILLADOR")) %>%
+     group_by(FUNCION)%>%summarize("Dispersion" = sd(PERSONAS))
+ggplot(data = sds, aes(x= FUNCION, y=Dispersion)) + geom_point(size = 2, col = "NAVY") + geom_hline(yintercept = 1, col = "RED", lwd = 1) + ylab("Desviaci√≥n estandar")+
+     theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+*Las funciones que no ser√°n tomadas en cuenta en nuestro an√°lisis son aquellas por debajo de la l√≠nea roja, que representan una desviaci√≥n estandar igual a 1*  
+
+
+3. La √∫ltima consideraci√≥n del an√°lisis es agrupar el total de personas, sin tomar en cuenta la funcion o el grado de especializaci√≥n como un solo valor.  Con esto se busca que la cantidad de personas necesarias, a√∫n si no son cr√≠ticas, influya de manera importante en la cantidad de pares que pueden ser producidos, al tomar en cuenta el total de personas estamos incluyendo las funciones tipo C, no cr√≠ticas, pero que son operaciones que no pueden dejar de hacerse, como limpiar, quemar hebras, armar hebillas,
+etc, y al mismo tiempo incluimos, pero con un menor "peso" todas aquellas funciones que descartamos anteriormente.  
+
+Por lo tanto buscaremos agrupar los modelos que, al agruparlos en una familia de productos, minimicen la dispersi√≥n en la necesidad de los 3 grupos que definimos:  
+
 *  **PESPUNTADOR** (todos los pespuntadores A y B)  
 *  **PRELIMINAR** (todos los preliminares A y B)  
-*  **TOTAL PERSONAS** (total de personas en todos los puestos de pespunte)  
-
-Agrupando a los pespuntadores y preliminar crÌticas se busca que los puestos crÌticos definan la  
-cantidad de pares que pueden hacerse y quÈ modelos realizar en cada familia de productos.   
-Considerando que los puestos con nivel **B** pueden realizar funciones de nivel **A** con una  
-menor velocidad.
-
-
-#### CONDICIONES GENERALES
-
-Las tablas requeridas para el an·lisis son:  
-1. Listado de modelos a evaluar.  
-2. **TIEMPOS** de proceso de cada modelo por actividad:  
-(*ESTILO, DEPARTAMENTO, FUNCION, TIEMPO, PERSONAS, META*).  
-Se utiliza el c·lculo ya realizado de *PERSONAS* que se obtiene del tiempo total *(TIEMPO)*  
-requerido para cada operacion por par (anteriormente balanceada) entre el tiempo total de trabajo  
-diario (9.5 hrs) para producir 100 pares por hora.  
-3. Modelos con venta o pronÛstico de venta.   
-.  
+*  **TOTAL PERSONAS** (total de personas de todas la funciones)  
 
 
 #### ANALISIS Y TRANFORMACION DE DATOS  
 
-Las funciones *A-PESPUNTADOR y B-PESPUNTADOR* se agrupan en **PESPUNTADOR** y  
-Las funciones *A-PRELIMINAR y B-PRELIMINAR* se agrupan en **PRELIMINAR**  
+Utilizando un **analisis de clusters** incluyendo las 3 variables (pespuntadores, preliminares y total de personas), podemos definir un n√∫mero de familias que agrupen una cantidad significativa de modelos.  Este an√°lisis agrupa los modelos midiendo las distancias entre cada uno de ellos y creando un √°rbol que las relaciona, m√°s adelante en el art√≠culo se explicar√° con m√°s detalle la forma en que se realiza el agrupamiento final de modelos.  
 
-Para cada uno de estos 2 grupos, la relaciÛn entre pespuntadores y preliminares de cada estilo,  
-se puede ver en la siguiente gr·fica: 
-
-```{r Exploratory, echo=FALSE}
-
-     p.plot <- spread(critico, FUNCIONCOMUN, PERSONAS)%>%
-          mutate("R.PESP" = round(PESPUNTADOR,0),"R.PREL" = round(PRELIMINAR,0))
-     
-     qplot(data = p.plot, x= R.PESP, y=R.PREL) + 
-          geom_point(col = "green", alpha = 0.3) +
-          stat_smooth(method = "lm")
-     
-     #familias a crear
-     familias <- 3
-     
-```
-
-Se puede deducir del gr·fico que al minimizar la desviaciÛn estandar entre los pespuntadores  
-necesarios para los modelos al crear una familia se minimiza tambiÈn para los preliminares en cierto  
-grado, al tener un correlaciÛn de **`r round(cor(p.plot$R.PESP, p.plot$R.PREL),2)`**.  
-
-Esta afirmaciÛn parece lÛgica, pues por cada pespunte realizado, se requiere una cierta cantidad de  
-preliminares que preparen el corte antes de coserlo, aunque es insuficiente, por la correlaciÛn que  
-presentan.  Por lo tanto basar la creaciÛn de las familias ˙nicamente agrupando la cantidad de  
-pespuntadores, no es suficiente y es necesario incluir en el an·lisis otros puestos crÌticos.  
-
-Realizando un **analisis de clusters**, incluyendo las 3 variables, podemos definir un n˙mero de familias  
-que agrupen una cantidad significativa de modelos, para minimizar la desviaciÛn estandar, y al  
-mismo tiempo crear la menor cantidad de familias de productos.
-
-Como se puede ver en la siguiente gr·fica, generar **`r familias`** familias parece lo m·s adecuado, pues a partir del  
-nivel marcado con la lÌnea roja, los modelos empiezan a agruparse en grupos cada vez  
-m·s pequeÒos y generando mayor cantidad de familias. Pasando de 3 a 6, por lo que en este an·lisis  
-agruparemos el 100% de nuestros productos en 3 grupos.
+Como se puede ver en la siguiente gr√°fica, generar **`r familias`** familias parece una opci√≥n razonable, pues a partir del nivel marcado con la l√≠nea roja, los modelos empiezan a agruparse en grupos cada vez m√°s peque√±os y generando mayor cantidad de familias.  
 
 ```{r hclustering, echo=FALSE, warning=FALSE}
      
 
-     #agrupando modelos con k mean y clusters y dandole m·s valor a pespuntadores
+     #agrupando modelos con k mean y clusters y dandole m√°s valor a pespuntadores
      #que a preliminares 2:1
      
      a <- spread(critico, FUNCIONCOMUN, PERSONAS)
@@ -216,18 +209,23 @@ agruparemos el 100% de nuestros productos en 3 grupos.
      p.clust <<- a1%>%
           mutate("PESP.POND" = PESPUNTADOR * 2)%>%
           select(id, ESTILO, COLECC, PESPUNTADOR, PESP.POND, PRELIMINAR, TOT.PERSONAS)
-
+     
+     Promedio.total <- sapply(p.clust[4:7], function(x) round(mean(x),2))
+     Desviacion.total <-sapply(p.clust[4:7], function(x) round(sd(x),2))
+     
      #kmeans analisis
      set.seed(0)
-     k <- kmeans(p.clust[,4:6], familias, nstart = 10, iter.max = 100)
+     k <<- kmeans(p.clust%>%select(PESPUNTADOR, PRELIMINAR, TOT.PERSONAS),
+                  familias, nstart = 10, iter.max = 100)
      
           #por medio de hclust
      Pesp.Prel.Tot <- dist(p.clust%>%select(PESPUNTADOR, PRELIMINAR, TOT.PERSONAS))
-     clusters <- hclust(Pesp.Prel.Tot)
+     clusters <- hclust(Pesp.Prel.Tot,method = "complete")
      
       #print dendogram
-     plot(clusters, axes = F, main = "Dendograma", xlab = "Modelos", ylab = "Altura")
-     abline(h = 30, col="red")
+     plot(clusters, axes = T, main = "Cluster de agrupamiento", 
+          xlab = "Modelos", ylab = "Altura")
+     abline(h = 22, col="red")
      famcluster <- cutree(clusters, k = familias)
      
      p.clust$FAMh <- famcluster
@@ -237,114 +235,138 @@ agruparemos el 100% de nuestros productos en 3 grupos.
 ```
 
 
-DespuÈs de utilizar el dendograma para definir la cantidad de familias a utilizar y por medio de  
-la metodologÌa de clusters K-mean, que genera un punto com˙n para un grupo de modelos basandose  
-en su distancia dentro de la gr·fica (x-pespuntadores, y-preliminares, z-total personas), generamos  
-la siguiente asignaciÛn de modelos a cada grupo o familia.
+Despu√©s de utilizar el m√©todo de clusters para visualizar como se relacionan los modelos por la cantidad de pespuntadores, preliminares y el total de personas necesarias utilizaremos la metolog√≠a de clusters K-mean, que genera un "centro" o punto com√∫n para un grupo de modelos basandose en la cantidad de personas necesarias para producir cada modelo.
 
-El an·lisis se realiza definiendo **`r familias`** clusters, en este caso **`r familias`** familias.
+Para explicar un poco como es que se realiza esta agrupaci√≥n se puede ver la siguiente gr√°fica:
 
-La relacion promedio entre la cantidad necesaria de preliminares y pespuntadores para la producciÛn  
-de 100 pares por hora es de 1:`r round(sum(sd.plot[sd.plot$FUNCIONCOMUN =="PRELIMINAR",5])/sum(sd.plot[sd.plot$FUNCIONCOMUN =="PESPUNTADOR",5]),2)`,
-                                   y por lo tanto, el c·lculo de la distancia entre puntos se desviar· a agrupar los modelos con un n˙mero similar de preliminares, pues al graficar y medir la distancia que  
-separa los puntos, estos estar·n m·s alejados de los puntos con una cantidad de pespuntadores similar.  
+```{r, echo=FALSE, fig.height=3, fig.width=6}
 
-En nuestro analisis vamos a dar m·s peso a agrupar el total de personas sobre pespuntadores o preli-  
-minares; se ponderar·n las variables utilizando la media de pespuntadores vs preliminar vs total de  
-personas (todas las funciones) y su desviaciÛn std. De esta forma forzamos que se agrupen por total  
-de personas, luego pespuntadores y posteriomente preliminares.  
+gr <- data.frame(x=c(4,4,5,6,9,11),y = c(2,3,3,4,5,9),z= c(1,1,1,1,2,2))
+centers <- data.frame(x=c(4.75, 10),y = c(3,7))
+graf1 <- ggplot(data = gr, aes(y=y, x=x, col=factor(z)))+ geom_point() + theme(legend.position="none") + ylab("Cantidad de preliminares") + 
+     xlab("Cantidad de pespuntadores") + 
+     ggtitle("Pespuntadores vs Preliminares") +
+     geom_point(data = centers, aes(y=y,x=x), col= "black", pch = 3, size = 4)
 
+gr <- data.frame(x=c(4,4,5,6,9,11),y = c(2,3,3,4,5,9),z= c(1,1,1,2,2,3))
+centers <- data.frame(x=c(4.3, 7.5 , 11),y = c(2.6, 4.5 ,9))
+graf2 <- ggplot(data = gr, aes(y=y, x=x, col=factor(z)))+ geom_point() + theme(legend.position="none") + ylab("Cantidad de preliminares") + 
+     xlab("Cantidad de pespuntadores") + 
+     ggtitle("Pespuntadores vs Preliminares")+
+     geom_point(data = centers, aes(y=y,x=x), col= "black", pch = 3, size = 4)
 
-```{r kmeans.plot, echo=FALSE, warning=F,error=F}
+grid.arrange(graf1, graf2, nrow = 1, ncol = 2)
+```
+
+En la gr√°fica izquierda vemos estilos que se agrupan en 2 familias (rojos y azules), donde la cruz representa el "centro" o promedio de cada grupo de puntos.Y en la gr√°fica derecha, el mismo ejercio, pero creando 3 familias de productos, basandose en agrupar aquellos modelos que generen la menor desviaci√≥n en la necesidad de cada funci√≥n.  
+
+Como se puede ver, los resultados son diferentes y las desviaciones entre los puntos con su centro esperar√≠amos que bajen al crear mayor cantidad de grupos, para definir este n√∫mero de manera simple e interpretable se utiliz√≥ el **Cluster de Agrupamiento**.   
+
+El ejemplo anterior representa, de forma simplificada como ser√° realizado el an√°lisis, pero utilizando la cantidad de pespuntadores, preliminares y el total de personas necesarias para cada estilo.  Al ver ejemplo, nos damos cuenta que podemos definir la cantidad de familias que sean necesarias, aunque al considerar gastos de supervisi√≥n, espacio y log√≠stica que requiere tener un mayor n√∫mero de familias, la decisi√≥n no involucra √∫nicamente bajar al m√≠nimo la desviaci√≥n en la necesidad de personas.  
+
+Por supuesto que en este tipo de  an√°lisis se pueden agregar variables como espacio, costo por familia, costo de balanceo del trabajo, pero la intenci√≥n de este art√≠culo es demostrar lo que puede lograrse utilizando de forma profesional la informaci√≥n que tenemos a la mano para tomar las mejores decisiones.  
+
+El agrupamiento comienza definiendo **`r familias`** clusters, en este caso **`r familias`** familias para agrupar todos los modelos. Y se puede ver en la siguiente gr√°fica la forma en que quedan agrupados los modelos.  
+
+```{r kmeans.plot, echo=FALSE, warning = F,error=F}
      #plot
-     clusplot(p.clust, k$cluster, main = "Agrupacion de estilos en familias",
-              color = T, labels = 1, lines = 0)
+     # suppressWarnings(
+     # clusplot(p.clust, k$cluster, main = "Agrupacion de estilos en familias",
+     #          color = T, labels = 4, lines = 0, xlab = "", 
+     #          ylab = "", span = FALSE, verbose = F, shade = T, stand = F, sub=""))
      p.clust$FAMILIA <- k$cluster
 
-
-     
      #ver asignaciones en pespuntador vs preliminar
      plot1 <- ggplot(data = p.clust, aes(PESPUNTADOR, PRELIMINAR)) + 
-          geom_point(aes(colour = factor(FAMILIA), size = TOT.PERSONAS, alpha = 0.5))
+          geom_point(aes(colour = factor(FAMILIA), size = TOT.PERSONAS), alpha= 0.5)+
+          ggtitle("Pespuntadores vs Preliminares vs Total de Personas")+
+          theme(legend.title=element_blank())
+     plot1
      
+```
+
+Los gr√°ficos representan el agrupamiento final de los estilos, representando en un color diferente cada familia, tomando en cuenta la relaci√≥n entre la cantidad de pespuntadores, preliminares y total de personas necesarias.  
+
+```{r final, echo=FALSE, warning = F,error=F}
+
      #convertir columnas en funcion comun
      plot.clust <<- gather(p.clust, "FUNCIONCOMUN", "PERSONAS",c(PRELIMINAR, PESPUNTADOR, TOT.PERSONAS))
      
      ##revisar visualmente la asignacion
      plot2 <- ggplot(data = plot.clust, aes(ESTILO, PERSONAS)) +
-          geom_point(aes(colour = factor(FAMILIA), alpha = 0.5)) +
+          geom_point(aes(colour = factor(FAMILIA)), alpha = 0.5, size = 3) +
           facet_grid(FUNCIONCOMUN~., scales = "free") +
-          theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
-                strip.text.y = element_text(size = 6),
+          theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 4),
+                strip.text.y = element_text(size = 10),
                 panel.grid.major = element_line(colour = "darkgrey",
-                                                linetype = "dotted"))
-     grid.arrange(plot1, plot2, nrow = 2, ncol=1)
+                                                linetype = "dotted"))+
+          theme(legend.title=element_blank())
+    plot2
      
 ```
 
-En este gr·fico se puede ver la cantidad de *PESPUNTADORES, PRELIMINARES y TOTAL DE PERSONAS*  
-que se requieren para cada estilo, identificados por las familias anterioremente creadadas por medio  
-de clusters. Y el tamaÒo de cada uno de los puntos representa la cantidad total de personas  
-requeridas, el eje horizontal la cantidad de pespuntadores y el vertical la cantidad de preliminares  
-para producir 100 pares por hora.  
-De esta forma podemos ver gr·ficamente que los modelos con cantidad de pespuntadores  
-similar quedan agrupados, excepto cuando la diferencia en el total de personas cambia de manera  
-notable.  
-
+En este gr√°fico se puede ver la cantidad de *PESPUNTADORES, PRELIMINARES y TOTAL DE PERSONAS* que se requieren para cada estilo, identificados por las familias anterioremente creadadas por medio de clusters. Y el tama√±o de cada uno de los puntos representa la cantidad total de personas requeridas, el eje horizontal la cantidad de pespuntadores y el vertical la cantidad de preliminares para producir 100 pares por hora.  
+De esta forma podemos ver gr√°ficamente que los modelos con cantidad de pespuntadores similar quedan agrupados, excepto cuando la diferencia en el total de personas cambia de manera notable.  
 
 #RESULTADO
 
-Al final del an·lisis, se agruparon los modelos en familias para lograr la menor desviaciÛn estandar,  
-lo que permite una desviaciÛn menor en los requerimientos de personal para producir los modelos  
-asignados en cada familia.  Esto permite:
+Al iniciar el an√°lisis revisamos que el promedio de pespuntadores para producir 100 pares por hora incluyendo todos los modelos en una solo familia era `r round(mean(sd.plot[sd.plot$FUNCIONCOMUN == "PESPUNTADOR",]$PERSONAS),2)`, con una desviaci√≥n estandar de `r round(sd(sd.plot[sd.plot$FUNCIONCOMUN == "PESPUNTADOR",]$PERSONAS),2)`. Como podemos ver en la sigueinte tabla de promedios y desviaciones para los grupos que generamos. 
+```{r}
+     Promedio.total
+     Desviacion.total
+```
 
-Al iniciar el an·lisis vimos que el promedio de pespuntadores para producir 100 pares por hora  era `r round(mean(sd.plot[sd.plot$FUNCIONCOMUN == "PESPUNTADOR",]$PERSONAS),2)`  
-, con una desviaciÛn estandar de `r round(sd(sd.plot[sd.plot$FUNCIONCOMUN == "PESPUNTADOR",]$PERSONAS),2)`.
-                                        Ahora encontramos 2 familias bien estandarizadas, con promedios  
-de personal requerido bien diferenciado y deviaciones estandar menores a 1.8.  Mientras que una familia  
-baja su desviaciÛn estandar a 2.97.
 
-*  Requerir menor cantidad de personal, (el balanceo tendra una eficencia real mayor).  
+Despu√©s de este √°nalisis se definieron `r familias` familias bien estandarizadas, con promedios de personal requerido bien diferenciado y deviaciones estandar menores, como se puede ver en las tablas finales.
+
+Esto permite:
+
+*  Bajar la cantidad de personal, (el balanceo tendra una eficencia real mayor).  
 *  Menor cantidad de movimientos internos y entre familias.
-*  Realizar una programaciÛn m·s cercana a la realidad, sin la necesidad de utilizar los tiempos  
-especificos de cada modelo para realizarla.
-*  Dar a los cliente una fecha de entrega m·s real, pues la diferencia de producciÛn diaria en  
-cada familia tiene menor diferencia.
-*  El personal sabe con mayor facilidad cuantos pares debe de producir hora con hora.
+*  Realizar una programaci√≥n m√°s cercana a la realidad, sin la necesidad de utilizar los tiempos especificos de cada modelo, pues la capacidad de producci√≥n para cada uno es similar.  
+*  Dar a los cliente una fecha de entrega m√°s real, pues la diferencia de producci√≥n diaria en cada familia tiene menor diferencia.
+*  El personal sabe con mayor facilidad cuantos pares debe de producir hora con hora, pues la diferencia entre modelos es menor.
 
-El paso siguiente a este an·lisis debe incluir la demanda o en su defecto el pronÛstico de la  
-demanda de cada modelo para obtener las plantillas de personal requerido para satisfacer las  
-necesidades del cliente.
+El paso siguiente a este an√°lisis debe incluir la demanda o en su defecto el pron√≥stico de la demanda de cada modelo para obtener las plantillas de personal requerido para satisfacer las necesidades del cliente.
 
-Posteriormente, comparando contra la plantilla actual de personal, podemos calcular las necesidades  
-de reclutamiento y capacitaciÛn.  Del mismo modo, nuestra capacidad futura de producciÛn o en su  
-defecto nuestra capacidad sobrante.  
+Posteriormente, comparando contra la plantilla actual de personal, podemos calcular las necesidades de reclutamiento y capacitaci√≥n.  Del mismo modo, nuestra capacidad futura de producci√≥n o en su defecto nuestra capacidad sobrante.  
 
-
-Para cada familia, la cantidad de **PESPUNTADORES** y su desviaciÛn la podemos ver en la siguiente tabla:  
+Para cada familia, la cantidad de **PESPUNTADORES** y su desviaci√≥n la podemos ver en la siguiente tabla:  
 ```{r resul_pespuntadores, echo=FALSE}
 
 
      avgpesp <- plot.clust%>%
           filter(FUNCIONCOMUN == "PESPUNTADOR")%>%
           group_by(FAMILIA)%>%
-          summarise("avg" = round(mean(PERSONAS),0), "sd" = round(sd(PERSONAS),2))
+          summarise("Promedio de pespuntadores" = round(mean(PERSONAS),0), 
+                    "Desviacion std" = round(sd(PERSONAS),2))
 
      kable(avgpesp, format = "markdown", padding = 2)
 
 ```
 
-Para cada familia, la cantidad de **PRELIMINARES** y su desviaciÛn la podemos ver en la siguiente tabla:  
+Para cada familia, la cantidad de **PRELIMINARES** y su desviaci√≥n la podemos ver en la siguiente tabla:  
 ```{r resul_preliminares, echo=FALSE}
      avgprel <- plot.clust%>%
           filter(FUNCIONCOMUN == "PRELIMINAR")%>%
           group_by(FAMILIA)%>%
-          summarise("avg" = round(mean(PERSONAS),0), "sd" = round(sd(PERSONAS),2))
+          summarise("Promedio de preliminares" = round(mean(PERSONAS),0), 
+                    "Desviaci√≥n std" = round(sd(PERSONAS),2))
 
      kable(avgprel, format = "markdown")
      
 ```
 
+Para cada familia, la cantidad de **TOTAL DE PERSONAS** y su desviaci√≥n la podemos ver en la siguiente tabla:  
+```{r resul_total_pers, echo=FALSE}
+     avgprel <- plot.clust%>%
+          group_by(FAMILIA)%>%
+          summarise("Promedio de personas total" = round(mean(PERSONAS),0), 
+                    "Desviaci√≥n std" = round(sd(PERSONAS),2))
+
+     kable(avgprel, format = "markdown")
+     
+```
 
 
 
